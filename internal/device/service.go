@@ -1,6 +1,11 @@
 package device
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+)
 
 type Filter struct {
 	Brand string
@@ -13,4 +18,52 @@ type Repository interface {
 	List(ctx context.Context, filter Filter) ([]Device, error)
 	Update(ctx context.Context, id string, fn func(d *Device) error) (Device, error)
 	Delete(ctx context.Context, id string, check func(d Device) error) error
+}
+
+type Service struct {
+	repo     Repository
+	notifier Notifier
+	logger   *slog.Logger
+}
+
+func NewService(repo Repository, notifier Notifier, logger *slog.Logger) *Service {
+	return &Service{repo: repo, notifier: notifier, logger: logger}
+}
+
+type CreateInput struct {
+	Name  string
+	Brand string
+	State State
+}
+
+func (s *Service) Create(ctx context.Context, in CreateInput) (Device, error) {
+
+	name := strings.TrimSpace(in.Name)
+	brand := strings.TrimSpace(in.Brand)
+
+	if name == "" {
+		return Device{}, fmt.Errorf("%w: name is required", ErrInvalidInput)
+	}
+
+	if brand == "" {
+		return Device{}, fmt.Errorf("%w: brand is required", ErrInvalidInput)
+	}
+
+	if in.State == "" {
+		in.State = StateAvailable
+	}
+
+	if !in.State.Valid() {
+		return Device{}, fmt.Errorf("%w: unknown state %q", ErrInvalidInput, in.State)
+	}
+
+	device := Device{
+		// ID and CreatedAt are left as is, database generates them.
+		// so every app instance uses same clock and id generator
+		Name:  name,
+		Brand: brand,
+		State: in.State,
+	}
+
+	return s.repo.Create(ctx, device)
 }
