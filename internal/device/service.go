@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type Filter struct {
@@ -37,7 +39,6 @@ type CreateInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (Device, error) {
-
 	name := strings.TrimSpace(in.Name)
 	brand := strings.TrimSpace(in.Brand)
 
@@ -66,4 +67,23 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Device, error) {
 	}
 
 	return s.repo.Create(ctx, device)
+}
+
+func (s *Service) Get(ctx context.Context, id string) (Device, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		// check the format for database
+		return Device{}, fmt.Errorf("%w: invalid id %q", ErrInvalidInput, id)
+	}
+
+	return s.repo.Get(ctx, id)
+}
+
+func (s *Service) List(ctx context.Context, f Filter) ([]Device, error) {
+	f.Brand = strings.TrimSpace(f.Brand)
+
+	if f.State != "" && !f.State.Valid() {
+		return nil, fmt.Errorf("%w: unknown state %q", ErrInvalidInput, f.State)
+	}
+
+	return s.repo.List(ctx, f)
 }
