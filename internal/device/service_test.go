@@ -19,6 +19,7 @@ type fakeRepo struct {
 	getIDs    []string // every id passed to Get
 	filters   []Filter // every Filter passed to List
 	updateIDs []string // every id passed to Update
+	deleteIDs []string // every id passed to Delete
 }
 
 func (f *fakeRepo) Create(ctx context.Context, d Device) (Device, error) {
@@ -55,6 +56,21 @@ func (f *fakeRepo) Update(ctx context.Context, id string, fn func(d *Device) err
 	}
 	f.devices[id] = d
 	return d, nil
+}
+
+// Delete mimics the real repository's contract: check sees the device, and
+// the device is removed only if check succeeds.
+func (f *fakeRepo) Delete(ctx context.Context, id string, check func(d Device) error) error {
+	f.deleteIDs = append(f.deleteIDs, id)
+	d, ok := f.devices[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if err := check(d); err != nil {
+		return err
+	}
+	delete(f.devices, id)
+	return nil
 }
 
 type fakeNotifier struct {
@@ -425,5 +441,53 @@ func TestServiceUpdateMalformedIDSkipsRepo(t *testing.T) {
 	}
 	if len(repo.updateIDs) != 0 {
 		t.Fatalf("repo.Update was called with %v", repo.updateIDs)
+	}
+}
+
+func TestServiceDelete(t *testing.T) {
+	const id = "7f1c2b9e-3a4d-4e5f-8a6b-1c2d3e4f5a6b"
+	const unknownID = "00000000-0000-4000-8000-000000000000"
+
+	tests := []struct {
+		name         string
+		id           string
+		start        State // stored state before the request
+		wantErr      error
+		wantDeleted  bool // whether the device is gone afterwards
+		wantRepoCall bool // whether the call should reach the repository
+	}{
+		{name: "available device", id: id, start: StateAvailable, wantDeleted: true, wantRepoCall: true},
+		{name: "inactive device", id: id, start: StateInactive, wantDeleted: true, wantRepoCall: true},
+		{name: "in-use device is kept", id: id, start: StateInUse, wantErr: ErrInUse, wantRepoCall: true},
+		{name: "unknown id", id: unknownID, start: StateAvailable, wantErr: ErrNotFound, wantRepoCall: true},
+		{name: "malformed id", id: "abc", start: StateAvailable, wantErr: ErrInvalidInput},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{devices: map[string]Device{id: {ID: id, Name: "Phone", Brand: "Acme", State: tt.start}}}
+			notifier := &fakeNotifier{}
+			svc := NewService(repo, notifier, discardLogger())
+
+			err := svc.Delete(context.Background(), tt.id)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if called := len(repo.deleteIDs) > 0; called != tt.wantRepoCall {
+				t.Errorf("repo.Delete called = %v, want %v", called, tt.wantRepoCall)
+			}
+			if _, exists := repo.devices[id]; exists == tt.wantDeleted {
+				t.Errorf("device exists = %v, want %v", exists, !tt.wantDeleted)
+			}
+			if len(notifier.changes) != 0 {
+				t.Errorf("delete must not notify, got %+v", notifier.changes)
+			}
+		})
 	}
 }
