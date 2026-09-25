@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -70,9 +71,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Device, error) {
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Device, error) {
-	if _, err := uuid.Parse(id); err != nil {
-		// check the format for database
-		return Device{}, fmt.Errorf("%w: invalid id %q", ErrInvalidInput, id)
+	// check format for database
+	if err := validateID(id); err != nil {
+		return Device{}, err
 	}
 
 	return s.repo.Get(ctx, id)
@@ -86,4 +87,82 @@ func (s *Service) List(ctx context.Context, f Filter) ([]Device, error) {
 	}
 
 	return s.repo.List(ctx, f)
+}
+
+type UpdateInput struct {
+	Name  *string
+	Brand *string
+	State *State
+}
+
+func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Device, error) {
+	// 1. Validate id
+	if err := validateID(id); err != nil {
+		return Device{}, err
+	}
+
+	var prev State
+	updated, err := s.repo.Update(ctx, id, func(d *Device) error {
+		prev = d.State
+		// 2. apply and validate changes
+		if in.Name != nil {
+			name := strings.TrimSpace(*in.Name)
+			if name == "" {
+				return fmt.Errorf("%w: invalid name", ErrInvalidInput)
+			}
+			if prev == StateInUse && name != d.Name {
+				return fmt.Errorf("%w: cannot change name", ErrInUse)
+			}
+			d.Name = name
+		}
+
+		if in.Brand != nil {
+			brand := strings.TrimSpace(*in.Brand)
+			if brand == "" {
+				return fmt.Errorf("%w: invalid brand", ErrInvalidInput)
+			}
+			if prev == StateInUse && brand != d.Brand {
+				return fmt.Errorf("%w: cannot change brand", ErrInUse)
+			}
+			d.Brand = brand
+		}
+
+		if in.State != nil {
+			if !in.State.Valid() {
+				return fmt.Errorf("%w: unknown state %q", ErrInvalidInput, *in.State)
+			}
+			d.State = *in.State
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return Device{}, err
+	}
+
+	// 3. notify if state changes
+	if prev != updated.State {
+		change := StateChange{
+			DeviceID:  updated.ID,
+			Previous:  prev,
+			Current:   updated.State,
+			ChangedAt: time.Now().UTC(),
+		}
+		err := s.notifier.Notify(ctx, change)
+		if err != nil {
+			s.logger.Error("notify state change failed", "device_id", updated.ID, "err", err)
+		}
+	}
+
+	return updated, nil
+}
+
+// validateID rejects malformed ids as invalid input (400); passed to
+// Postgres, they would fail the uuid column cast and surface as a 500.
+func validateID(id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return fmt.Errorf("%w: invalid id %q", ErrInvalidInput, id)
+	}
+	return nil
 }
