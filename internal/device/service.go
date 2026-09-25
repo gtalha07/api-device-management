@@ -158,6 +158,20 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Device
 	return updated, nil
 }
 
+func (s *Service) Delete(ctx context.Context, id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+
+	return s.repo.Delete(ctx, id, func(d Device) error {
+		if d.State == StateInUse {
+			return fmt.Errorf("%w: cannot delete device", ErrInUse)
+		}
+
+		return nil
+	})
+}
+
 // validateID rejects malformed ids as invalid input (400); passed to
 // Postgres, they would fail the uuid column cast and surface as a 500.
 func validateID(id string) error {
