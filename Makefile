@@ -1,0 +1,27 @@
+DATABASE_URL ?= postgres://devices:devices@localhost:5433/devices?sslmode=disable
+MIGRATE := migrate -path migrations -database "$(DATABASE_URL)"
+
+.PHONY: db-up db-down db-reset migrate-up migrate-down test test-integration
+
+db-up:
+	docker compose up -d --wait db
+
+db-down:
+	docker compose down
+
+migrate-up:
+	$(MIGRATE) up
+
+migrate-down:
+	$(MIGRATE) down 1
+
+# Local development only: drops everything in the schema, then re-applies all migrations.
+db-reset: db-up
+	$(MIGRATE) drop -f
+	$(MIGRATE) up
+
+test:
+	go test ./...
+
+test-integration: db-up migrate-up
+	TEST_DATABASE_URL="$(DATABASE_URL)" go test -count=1 -v ./...
