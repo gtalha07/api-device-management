@@ -1,3 +1,4 @@
+// Package migrations embeds the SQL migration files into the binary.
 package database
 
 import (
@@ -12,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// Migrate applies every pending migration in migrations. A database that is
+// already up to date is not an error.
 func Migrate(pool *pgxpool.Pool, migrations fs.FS) error {
 	src, err := iofs.New(migrations, ".")
 	if err != nil {
