@@ -1,8 +1,13 @@
 package notify
 
 import (
+	"bufio"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +25,21 @@ func testChange(id string) device.StateChange {
 		Current:   device.StateInUse,
 		ChangedAt: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func openStream(t *testing.T, url string) (http.Header, io.Reader) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp.Header, resp.Body
 }
 
 func TestHubNotifyFansOut(t *testing.T) {
@@ -79,5 +99,64 @@ func TestHubClosedRefusesSubscribers(t *testing.T) {
 
 	if _, ok := h.subscribe(); ok {
 		t.Error("subscribe after Close succeeded, want refused")
+	}
+}
+
+func TestHubServeHTTPStreamsEvents(t *testing.T) {
+	h := newTestHub()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	t.Cleanup(h.Close)
+
+	header, body := openStream(t, srv.URL)
+
+	if ct := header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	// The handler subscribes before sending headers, so this is not lost.
+	change := testChange("d1")
+	if err := h.Notify(t.Context(), change); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	line, err := bufio.NewReader(body).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read event: %v", err)
+	}
+	data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+	if !ok {
+		t.Fatalf("line = %q, want a data: line", line)
+	}
+	var got device.StateChange
+	if err := json.Unmarshal([]byte(data), &got); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	if got != change {
+		t.Errorf("event = %+v, want %+v", got, change)
+	}
+}
+
+func TestHubServeHTTPEndsOnClose(t *testing.T) {
+	h := newTestHub()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	_, body := openStream(t, srv.URL)
+
+	h.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(body)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("stream ended with error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream still open 2s after Close")
 	}
 }
