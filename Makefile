@@ -26,13 +26,13 @@ db-reset: db-up
 test:
 	go test ./...
 
-test-integration: db-up migrate-up
+test-integration: db-up
 	TEST_DATABASE_URL="$(DATABASE_URL)" go test -count=1 -v ./...
 
 lint:
 	golangci-lint run ./...
 
-cover: db-up migrate-up
+cover: db-up
 	TEST_DATABASE_URL="$(DATABASE_URL)" go test -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 	go tool cover -html=coverage.out -o coverage.html

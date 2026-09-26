@@ -10,10 +10,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/gtalha07/api-device-management/internal/database"
+	"github.com/gtalha07/api-device-management/migrations"
 )
 
-// newTestRepo connects to TEST_DATABASE_URL and empties the devices table.
-// Tests using it are skipped when the variable is unset.
+// newTestRepo connects to TEST_DATABASE_URL, applies the migrations and
+// empties the devices table. Tests using it are skipped when the variable is
+// unset.
+//
+// TODO: the tests share one database with local development and truncate it.
+// A dedicated test database, or testcontainers-go, would isolate them.
 func newTestRepo(t *testing.T) *PostgresRepository {
 	t.Helper()
 
@@ -28,6 +35,9 @@ func newTestRepo(t *testing.T) *PostgresRepository {
 	}
 	t.Cleanup(pool.Close)
 
+	if err := database.Migrate(pool, migrations.FS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	if _, err := pool.Exec(t.Context(), "TRUNCATE devices"); err != nil {
 		t.Fatalf("truncate devices: %v", err)
 	}
