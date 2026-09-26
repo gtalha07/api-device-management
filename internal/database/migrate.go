@@ -1,4 +1,3 @@
-// Package migrations embeds the SQL migration files into the binary.
 package database
 
 import (
@@ -31,7 +30,7 @@ func Migrate(pool *pgxpool.Pool, migrations fs.FS) error {
 	if err != nil {
 		return fmt.Errorf("create migrator: %w", err)
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("apply migrations: %w", err)

@@ -22,14 +22,14 @@ type fakeRepo struct {
 	deleteIDs []string // every id passed to Delete
 }
 
-func (f *fakeRepo) Create(ctx context.Context, d Device) (Device, error) {
+func (f *fakeRepo) Create(_ context.Context, d Device) (Device, error) {
 	d.ID = "test-1"
 	d.CreatedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	f.created = append(f.created, d)
 	return d, nil
 }
 
-func (f *fakeRepo) Get(ctx context.Context, id string) (Device, error) {
+func (f *fakeRepo) Get(_ context.Context, id string) (Device, error) {
 	f.getIDs = append(f.getIDs, id)
 	d, ok := f.devices[id]
 	if !ok {
@@ -38,14 +38,14 @@ func (f *fakeRepo) Get(ctx context.Context, id string) (Device, error) {
 	return d, nil
 }
 
-func (f *fakeRepo) List(ctx context.Context, filter Filter) ([]Device, error) {
+func (f *fakeRepo) List(_ context.Context, filter Filter) ([]Device, error) {
 	f.filters = append(f.filters, filter)
 	return f.listed, nil
 }
 
 // Update mimics the real repository's contract: fn works on a copy, and the
 // copy is stored only if fn succeeds, so a failing fn behaves like a rollback.
-func (f *fakeRepo) Update(ctx context.Context, id string, fn func(d *Device) error) (Device, error) {
+func (f *fakeRepo) Update(_ context.Context, id string, fn func(d *Device) error) (Device, error) {
 	f.updateIDs = append(f.updateIDs, id)
 	d, ok := f.devices[id]
 	if !ok {
@@ -60,7 +60,7 @@ func (f *fakeRepo) Update(ctx context.Context, id string, fn func(d *Device) err
 
 // Delete mimics the real repository's contract: check sees the device, and
 // the device is removed only if check succeeds.
-func (f *fakeRepo) Delete(ctx context.Context, id string, check func(d Device) error) error {
+func (f *fakeRepo) Delete(_ context.Context, id string, check func(d Device) error) error {
 	f.deleteIDs = append(f.deleteIDs, id)
 	d, ok := f.devices[id]
 	if !ok {
@@ -78,7 +78,7 @@ type fakeNotifier struct {
 	changes []StateChange // every change passed to Notify
 }
 
-func (n *fakeNotifier) Notify(ctx context.Context, change StateChange) error {
+func (n *fakeNotifier) Notify(_ context.Context, change StateChange) error {
 	n.changes = append(n.changes, change)
 	return n.err
 }

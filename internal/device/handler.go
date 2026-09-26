@@ -49,7 +49,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := h.service.Create(r.Context(), CreateInput{Name: req.Name, Brand: req.Brand, State: req.State})
+	d, err := h.service.Create(r.Context(), CreateInput(req))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -116,9 +116,7 @@ func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
 
 // update applies req to the device in the path; PUT and PATCH both end here.
 func (h *Handler) update(w http.ResponseWriter, r *http.Request, req updateRequest) {
-	in := UpdateInput{Name: req.Name, Brand: req.Brand, State: req.State}
-
-	d, err := h.service.Update(r.Context(), r.PathValue("id"), in)
+	d, err := h.service.Update(r.Context(), r.PathValue("id"), UpdateInput(req))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -145,7 +143,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		return fmt.Errorf("%w: malformed JSON body: %v", ErrInvalidInput, err)
+		return fmt.Errorf("%w: malformed JSON body: %w", ErrInvalidInput, err)
 	}
 	return nil
 }

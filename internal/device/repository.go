@@ -98,7 +98,7 @@ func (r *PostgresRepository) Update(ctx context.Context, id string, fn func(d *D
 	if err != nil {
 		return Device{}, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) // no-op once Commit has succeeded
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once Commit has succeeded
 
 	d, err := scanDevice(tx.QueryRow(ctx, lockDeviceQuery, id))
 	if err != nil {
@@ -130,7 +130,7 @@ func (r *PostgresRepository) Delete(ctx context.Context, id string, check func(d
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	d, err := scanDevice(tx.QueryRow(ctx, lockDeviceQuery, id))
 	if err != nil {

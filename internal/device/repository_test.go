@@ -182,7 +182,7 @@ func TestPostgresRepositoryUpdateNotFound(t *testing.T) {
 	repo := newTestRepo(t)
 
 	called := false
-	_, err := repo.Update(t.Context(), uuid.NewString(), func(d *Device) error {
+	_, err := repo.Update(t.Context(), uuid.NewString(), func(*Device) error {
 		called = true
 		return nil
 	})
