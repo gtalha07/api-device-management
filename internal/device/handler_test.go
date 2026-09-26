@@ -12,7 +12,7 @@ import (
 
 func newTestHandler(repo Repository) http.Handler {
 	mux := http.NewServeMux()
-	NewHandler(newTestService(repo), discardLogger()).Register(mux)
+	NewHandler(NewService(repo, &fakeNotifier{}, discardLogger()), discardLogger()).Register(mux)
 	return mux
 }
 
@@ -193,6 +193,97 @@ func TestHandlerList(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.listed) {
 				t.Errorf("body = %+v, want %+v", got, tt.listed)
+			}
+		})
+	}
+}
+
+func TestHandlerUpdate(t *testing.T) {
+	const availableID = "7f1c2b9e-3a4d-4e5f-8a6b-1c2d3e4f5a6b"
+	const inUseID = "2b8e4c1d-6f3a-4b7e-9c2d-8e1f3a5b7c9d"
+	const unknownID = "00000000-0000-4000-8000-000000000000"
+	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	available := Device{ID: availableID, Name: "Phone X", Brand: "Acme", State: StateAvailable, CreatedAt: created}
+	inUse := Device{ID: inUseID, Name: "Phone Y", Brand: "Acme", State: StateInUse, CreatedAt: created}
+
+	tests := []struct {
+		name        string
+		method      string
+		id          string
+		body        string
+		wantStatus  int
+		wantError   string
+		want        Device // checked on 200
+		wantRepoHit bool
+	}{
+		{
+			name: "PUT replaces every field", method: http.MethodPut, id: availableID,
+			body:       `{"name":"Phone Z","brand":"Globex","state":"inactive"}`,
+			wantStatus: http.StatusOK, wantRepoHit: true,
+			want: Device{ID: availableID, Name: "Phone Z", Brand: "Globex", State: StateInactive, CreatedAt: created},
+		},
+		{
+			name: "PUT with a missing field", method: http.MethodPut, id: availableID,
+			body:       `{"name":"Phone Z","brand":"Globex"}`,
+			wantStatus: http.StatusBadRequest, wantError: "invalid input: name, brand and state are required",
+		},
+		{
+			name: "PUT with createdAt", method: http.MethodPut, id: availableID,
+			body:       `{"name":"Phone Z","brand":"Globex","state":"inactive","createdAt":"2020-01-01T00:00:00Z"}`,
+			wantStatus: http.StatusBadRequest, wantError: `invalid input: malformed JSON body: json: unknown field "createdAt"`,
+		},
+		{
+			name: "PATCH changes only the given field", method: http.MethodPatch, id: availableID,
+			body:       `{"state":"in-use"}`,
+			wantStatus: http.StatusOK, wantRepoHit: true,
+			want: Device{ID: availableID, Name: "Phone X", Brand: "Acme", State: StateInUse, CreatedAt: created},
+		},
+		{
+			name: "PATCH with an empty object changes nothing", method: http.MethodPatch, id: availableID,
+			body:       `{}`,
+			wantStatus: http.StatusOK, wantRepoHit: true, want: available,
+		},
+		{
+			name: "PATCH name of an in-use device", method: http.MethodPatch, id: inUseID,
+			body:       `{"name":"Renamed"}`,
+			wantStatus: http.StatusConflict, wantError: "device is in use: cannot change name", wantRepoHit: true,
+		},
+		{
+			name: "PATCH unknown id", method: http.MethodPatch, id: unknownID,
+			body:       `{"state":"inactive"}`,
+			wantStatus: http.StatusNotFound, wantError: "device not found", wantRepoHit: true,
+		},
+		{
+			name: "PATCH malformed id", method: http.MethodPatch, id: "abc",
+			body:       `{"state":"inactive"}`,
+			wantStatus: http.StatusBadRequest, wantError: `invalid input: invalid id "abc"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{devices: map[string]Device{availableID: available, inUseID: inUse}}
+			rec := do(repo, tt.method, "/devices/"+tt.id, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if hit := len(repo.updateIDs) > 0; hit != tt.wantRepoHit {
+				t.Errorf("repo.Update called = %v, want %v", hit, tt.wantRepoHit)
+			}
+			if tt.wantError != "" {
+				if got := decodeError(t, rec); got != tt.wantError {
+					t.Errorf("error = %q, want %q", got, tt.wantError)
+				}
+				return
+			}
+
+			var got Device
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("body = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
