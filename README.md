@@ -87,10 +87,12 @@ Errors always look like `{"error": "<message>"}`:
 | `500` | Unexpected error; details are logged, never returned |
 
 The full contract, with every schema and example, is in
-[`api/openapi.yaml`](api/openapi.yaml). To browse it:
+[`api/openapi.yaml`](api/openapi.yaml). To browse it, render it to a single
+HTML page (or paste the file into [editor.swagger.io](https://editor.swagger.io)):
 
 ```sh
-npx @redocly/cli preview-docs api/openapi.yaml
+npx @redocly/cli build-docs api/openapi.yaml -o /tmp/api-docs.html
+open /tmp/api-docs.html      # macOS; use xdg-open on Linux
 ```
 
 ## Local development
