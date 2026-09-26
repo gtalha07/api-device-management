@@ -10,6 +10,8 @@ import (
 
 // LogNotifier publishes state changes as structured log events. It stands in
 // for a real transport (webhook, message broker) behind the same interface.
+//
+// TODO: replace with a real transport; only this type and main need to change.
 type LogNotifier struct {
 	logger *slog.Logger
 }

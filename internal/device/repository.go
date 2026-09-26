@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// PostgresRepository implements Repository on Postgres. Update and Delete use
+// a transaction with SELECT ... FOR UPDATE to lock the row for their callback.
 type PostgresRepository struct {
 	pool *pgxpool.Pool
 }

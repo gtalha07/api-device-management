@@ -48,6 +48,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
+	// TODO: migrating at startup suits a single service. With many replicas
+	// or slow migrations, run them as a separate deploy step instead.
 	if err := database.Migrate(pool, migrations.FS); err != nil {
 		return err
 	}
@@ -61,7 +63,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	device.NewHandler(service, logger).Register(mux)
 
-	// health check
+	// health check: a readiness probe (can we serve?).
+	// TODO: add a separate liveness probe that doesn't depend on the
+	// database, so an outage doesn't make an orchestrator restart the app.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

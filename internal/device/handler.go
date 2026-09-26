@@ -19,6 +19,9 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 }
 
 // Register adds the device routes to mux.
+//
+// TODO: the API has no authentication, authorization or rate limiting; add
+// them as middleware before exposing it beyond a trusted network.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /devices", h.create)
 	mux.HandleFunc("GET /devices", h.list)
@@ -88,6 +91,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 // replace handles PUT: the body is the full new representation, so every
 // field is required.
+//
+// TODO: two clients can PUT from the same stale read and the last one wins.
+// ETag + If-Match (412 on mismatch) would prevent lost updates.
 func (h *Handler) replace(w http.ResponseWriter, r *http.Request) {
 	var req updateRequest
 	if err := decodeJSON(w, r, &req); err != nil {
@@ -135,6 +141,8 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// TODO: a body over the limit is reported as 400; errors.As on
+// *http.MaxBytesError could return 413 Request Entity Too Large instead.
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {

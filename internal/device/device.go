@@ -1,3 +1,5 @@
+// Package device implements the device domain: the model, its business
+// rules, Postgres storage and the HTTP API.
 package device
 
 import (
@@ -31,6 +33,8 @@ type Device struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// Domain errors, matched with errors.Is. The HTTP handler maps ErrNotFound to
+// 404, ErrInUse to 409 and ErrInvalidInput to 400.
 var (
 	ErrNotFound     = errors.New("device not found")
 	ErrInUse        = errors.New("device is in use")

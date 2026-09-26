@@ -10,11 +10,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// Filter narrows List results. Empty fields don't filter.
+//
+// TODO: brand matches exactly and case-sensitively; case-insensitive search
+// would need lower(brand) in the query and an index on lower(brand).
 type Filter struct {
 	Brand string
 	State State
 }
 
+// Repository stores devices. Update and Delete run their callback while the
+// device is locked, so the callback sees the current row and no other write
+// can happen between its check and the change. A callback error aborts the
+// operation, nothing is written, and the error is returned unchanged.
 type Repository interface {
 	Create(ctx context.Context, d Device) (Device, error)
 	Get(ctx context.Context, id string) (Device, error)
@@ -29,6 +37,8 @@ type Service struct {
 	logger   *slog.Logger
 }
 
+// NewService returns a Service. notifier must not be nil: it is called on
+// every state change.
 func NewService(repo Repository, notifier Notifier, logger *slog.Logger) *Service {
 	return &Service{repo: repo, notifier: notifier, logger: logger}
 }
@@ -79,6 +89,10 @@ func (s *Service) Get(ctx context.Context, id string) (Device, error) {
 	return s.repo.Get(ctx, id)
 }
 
+// List returns the devices matching f.
+//
+// TODO: no pagination; every matching row is returned. Keyset pagination on
+// (created_at, id), which List already orders by, would bound the response.
 func (s *Service) List(ctx context.Context, f Filter) ([]Device, error) {
 	f.Brand = strings.TrimSpace(f.Brand)
 
@@ -89,12 +103,16 @@ func (s *Service) List(ctx context.Context, f Filter) ([]Device, error) {
 	return s.repo.List(ctx, f)
 }
 
+// UpdateInput holds the fields to change. A nil field is left unchanged.
 type UpdateInput struct {
 	Name  *string
 	Brand *string
 	State *State
 }
 
+// Update applies in to the device with the given id. Name and brand can't
+// change while the device is in use. Subscribers are notified only after a
+// state change has been committed.
 func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Device, error) {
 	// 1. Validate id
 	if err := validateID(id); err != nil {
@@ -149,6 +167,9 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Device
 			Current:   updated.State,
 			ChangedAt: time.Now().UTC(),
 		}
+		// TODO: ctx is the request context, so a client disconnecting right
+		// after the commit would cancel a network-based delivery. Pass
+		// context.WithoutCancel(ctx) once Notify does real I/O.
 		err := s.notifier.Notify(ctx, change)
 		if err != nil {
 			s.logger.Error("notify state change failed", "device_id", updated.ID, "err", err)
