@@ -21,7 +21,12 @@ const subscriberBuffer = 16
 const keepAliveInterval = 15 * time.Second
 
 // Hub fans state changes out to clients subscribed over Server-Sent Events.
-// A Subscriber/Client that falls behind the missed events doesn't get it
+// Delivery is best effort: a subscriber that falls behind misses events, and
+// a client that reconnects doesn't get the ones it missed.
+//
+// TODO: the hub is in memory, so each instance only sees its own changes. With
+// several replicas, fan out through a shared broker (Postgres LISTEN/NOTIFY,
+// Redis, NATS); add event ids so clients can resume with Last-Event-ID.
 type Hub struct {
 	logger *slog.Logger
 

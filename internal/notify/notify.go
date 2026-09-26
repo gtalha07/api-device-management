@@ -8,10 +8,8 @@ import (
 	"github.com/gtalha07/api-device-management/internal/device"
 )
 
-// LogNotifier publishes state changes as structured log events. It stands in
-// for a real transport (webhook, message broker) behind the same interface.
-//
-// TODO: replace with a real transport; only this type and main need to change.
+// LogNotifier publishes state changes as structured log events, alongside the
+// SSE Hub, so every change is also in the logs.
 type LogNotifier struct {
 	logger *slog.Logger
 }
