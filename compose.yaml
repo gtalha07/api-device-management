@@ -1,4 +1,15 @@
 services:
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgres://devices:devices@db:5432/devices?sslmode=disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:17-alpine
     environment:
