@@ -3,11 +3,13 @@
 [![CI](https://github.com/gtalha07/api-device-management/actions/workflows/ci.yml/badge.svg?branch=mainline)](https://github.com/gtalha07/api-device-management/actions/workflows/ci.yml)
 
 A REST API in Go for managing devices and their lifecycle state, backed by
-PostgreSQL. Subscribers are notified of every state change once it has been
-saved.
+PostgreSQL. Clients can subscribe to a live stream of state changes, sent
+once each change has been saved.
 
 - Create, fully or partially update, fetch, list (filter by brand and/or
   state) and delete devices.
+- Subscribe to state changes (device id, previous and new state) over
+  Server-Sent Events.
 - Business rules: creation time never changes; name and brand can't change
   while a device is `in-use`; `in-use` devices can't be deleted.
 - Documented with [OpenAPI 3.1](api/openapi.yaml), containerized, and checked
@@ -24,13 +26,28 @@ docker compose up -d --build
 The API listens on `http://localhost:8080` and migrates the database on
 startup.
 
+In one terminal, subscribe to state changes:
+
+```sh
+curl -N localhost:8080/devices/events
+```
+
+In another, create a device and change its state:
+
 ```sh
 curl -i -X POST localhost:8080/devices -d '{"name":"Phone X","brand":"Acme"}'
 curl -s "localhost:8080/devices?state=available"
 curl -s -X PATCH localhost:8080/devices/<id> -d '{"state":"in-use"}'
-docker compose logs api      # shows the "device state changed" event
-docker compose down          # add -v to also delete the database volume
 ```
+
+The first terminal receives:
+
+```
+data: {"deviceId":"<id>","previous":"available","current":"in-use","changedAt":"..."}
+```
+
+Stop everything with `docker compose down` (add `-v` to also delete the
+database volume).
 
 ## API
 
@@ -42,6 +59,7 @@ docker compose down          # add -v to also delete the database volume
 | `PUT` | `/devices/{id}` | Replace name, brand and state (all required) | `200` |
 | `PATCH` | `/devices/{id}` | Change only the fields sent | `200` |
 | `DELETE` | `/devices/{id}` | Delete a device | `204` |
+| `GET` | `/devices/events` | Subscribe to state changes (Server-Sent Events) | `200`, stream |
 | `GET` | `/healthz` | Readiness: can the service reach the database | `200` / `503` |
 
 A device:
@@ -111,7 +129,8 @@ stricter.
 ## Testing
 
 - **Unit tests** cover the service rules and every HTTP handler with a fake
-  repository and notifier.
+  repository and notifier, and the event stream: fan-out, slow subscribers,
+  and streams ending on shutdown.
 - **Integration tests** run the repository against real Postgres, including a
   test that races two concurrent updates to prove the row lock works. They
   run only when `TEST_DATABASE_URL` is set and migrate the schema themselves.
@@ -129,7 +148,7 @@ and not unit-tested.
 cmd/api/            main: config, wiring, HTTP server, graceful shutdown
 internal/device/    model, business rules (service), Postgres repository, HTTP handlers
 internal/database/  connection pool with startup ping; embedded migrations runner
-internal/notify/    Notifier implementation (structured log events)
+internal/notify/    Notifiers: SSE hub for subscribers, structured log, and Multi to use both
 migrations/         SQL migrations (golang-migrate), embedded into the binary
 api/openapi.yaml    API specification
 ```
@@ -140,7 +159,9 @@ api/openapi.yaml    API specification
   transaction after `SELECT ... FOR UPDATE`, so concurrent requests can't slip
   a change between the in-use check and the write.
 - **Notifications are sent only after commit,** so subscribers never hear
-  about a change that was rolled back.
+  about a change that was rolled back. They are pushed over Server-Sent
+  Events without ever blocking the update: a slow client misses events
+  instead of delaying the request.
 - **The database enforces the rules too:** `CHECK` constraints for non-blank
   name/brand and valid state, and `created_at` is never part of an `UPDATE`.
 - **Standard library HTTP and manual wiring:** Go 1.22+ routing, domain errors
@@ -154,10 +175,14 @@ api/openapi.yaml    API specification
 
 Each item is also a `TODO` next to the relevant code.
 
-- **Notifications are at-most-once.** A crash between commit and notify loses
-  the event; a transactional outbox would make delivery at-least-once. The
-  notifier writes structured logs and would be replaced by a real transport
-  (webhook, message broker).
+- **Notifications are best effort.** Missed events (slow client, disconnect,
+  crash between commit and notify) aren't replayed, which the requirements
+  allow. A transactional outbox plus event ids (SSE `Last-Event-ID`) would
+  make delivery at-least-once with replay.
+- **The event hub is in memory, per instance.** With several replicas, a
+  client only sees changes made through the instance it's connected to; a
+  shared broker (for example Postgres `LISTEN/NOTIFY`, Redis or NATS) would
+  fan events out across instances.
 - **No pagination** on `GET /devices`; keyset pagination on
   `(created_at, id)` would bound responses.
 - **No authentication, authorization or rate limiting.**

@@ -12,9 +12,10 @@ info:
     - A device that is `in-use` can't be deleted.
 
     Subscribers are notified of every state change (device id, previous and
-    new state) after the change has been saved.
+    new state) after the change has been saved: clients subscribe with
+    `GET /devices/events`, a Server-Sent Events stream.
 
-    All request and response bodies are JSON. Every error response has the
+    All request and response bodies are JSON, except the event stream. Every error response has the
     same shape: `{"error": "<message>"}`. Request bodies reject unknown
     fields, including `id` and `createdAt`, with a 400.
 
@@ -28,6 +29,8 @@ security: []
 tags:
   - name: Devices
     description: Create, read, update and delete devices.
+  - name: Events
+    description: Live notifications of device state changes.
   - name: Health
     description: Probes for orchestrators and load balancers.
 
@@ -204,6 +207,45 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /devices/events:
+    get:
+      tags: [Events]
+      operationId: streamStateChanges
+      summary: Subscribe to device state changes
+      description: |
+        Opens a Server-Sent Events stream. Every committed state change is
+        sent to every connected client as one event whose `data:` line is a
+        `StateChange` JSON object. Changes that fail (for example a 409) send
+        nothing.
+
+        A comment line (`: keep-alive`) is sent every 15 seconds so idle
+        connections stay open. Delivery is best effort: a client that falls
+        behind or is disconnected misses events, and they aren't replayed on
+        reconnect.
+
+        Try it with `curl -N localhost:8080/devices/events`.
+      responses:
+        "200":
+          description: The stream. Stays open until the client disconnects or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Each event is a `data:` line holding a StateChange, followed by a blank line.
+                contentMediaType: application/json
+                contentSchema:
+                  $ref: "#/components/schemas/StateChange"
+              example: |
+                data: {"deviceId":"3e3d6681-72d4-4654-a3a8-64eaba8d1c1d","previous":"available","current":"in-use","changedAt":"2026-09-26T17:53:27.886138Z"}
+
+        "503":
+          description: The server is shutting down.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: shutting down
+
   /healthz:
     get:
       tags: [Health]
@@ -262,6 +304,22 @@ components:
         brand: Acme
         state: available
         createdAt: "2026-09-26T16:00:58.652868Z"
+
+    StateChange:
+      type: object
+      required: [deviceId, previous, current, changedAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+        previous:
+          $ref: "#/components/schemas/State"
+        current:
+          $ref: "#/components/schemas/State"
+        changedAt:
+          type: string
+          format: date-time
+          description: When the change was committed, in UTC.
 
     Name:
       type: string
