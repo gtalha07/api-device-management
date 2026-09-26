@@ -23,12 +23,22 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /devices", h.create)
 	mux.HandleFunc("GET /devices", h.list)
 	mux.HandleFunc("GET /devices/{id}", h.get)
+	mux.HandleFunc("PUT /devices/{id}", h.replace)
+	mux.HandleFunc("PATCH /devices/{id}", h.patch)
 }
 
 type createRequest struct {
 	Name  string `json:"name"`
 	Brand string `json:"brand"`
 	State State  `json:"state"`
+}
+
+// updateRequest uses pointers so a missing field (nil) can be told apart
+// from an empty one ("").
+type updateRequest struct {
+	Name  *string `json:"name"`
+	Brand *string `json:"brand"`
+	State *State  `json:"state"`
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +83,47 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, devices)
+}
+
+// replace handles PUT: the body is the full new representation, so every
+// field is required.
+func (h *Handler) replace(w http.ResponseWriter, r *http.Request) {
+	var req updateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	if req.Name == nil || req.Brand == nil || req.State == nil {
+		h.writeError(w, r, fmt.Errorf("%w: name, brand and state are required", ErrInvalidInput))
+		return
+	}
+
+	h.update(w, r, req)
+}
+
+// patch handles PATCH: only the fields present in the body change.
+func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
+	var req updateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	h.update(w, r, req)
+}
+
+// update applies req to the device in the path; PUT and PATCH both end here.
+func (h *Handler) update(w http.ResponseWriter, r *http.Request, req updateRequest) {
+	in := UpdateInput{Name: req.Name, Brand: req.Brand, State: req.State}
+
+	d, err := h.service.Update(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, d)
 }
 
 const maxBodyBytes = 1 << 20 // 1 MiB
