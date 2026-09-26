@@ -1,0 +1,373 @@
+openapi: 3.1.0
+
+info:
+  title: Devices API
+  version: 1.0.0
+  description: |
+    Manage devices and their lifecycle state.
+
+    Business rules:
+    - `createdAt` is set by the server and can never change.
+    - `name` and `brand` can't change while a device is `in-use`.
+    - A device that is `in-use` can't be deleted.
+
+    Subscribers are notified of every state change (device id, previous and
+    new state) after the change has been saved.
+
+    All request and response bodies are JSON. Every error response has the
+    same shape: `{"error": "<message>"}`. Request bodies reject unknown
+    fields, including `id` and `createdAt`, with a 400.
+
+servers:
+  - url: http://localhost:8080
+    description: Local (docker compose up, or make run)
+
+# No authentication yet (see the README's limitations); declared explicitly.
+security: []
+
+tags:
+  - name: Devices
+    description: Create, read, update and delete devices.
+  - name: Health
+    description: Probes for orchestrators and load balancers.
+
+paths:
+  /devices:
+    post:
+      tags: [Devices]
+      operationId: createDevice
+      summary: Create a device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDevice"
+            example:
+              name: Phone X
+              brand: Acme
+      responses:
+        "201":
+          description: Created. `Location` points to the new device.
+          headers:
+            Location:
+              description: URL of the new device.
+              schema:
+                type: string
+                example: /devices/3e3d6681-72d4-4654-a3a8-64eaba8d1c1d
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: List devices
+      description: |
+        Returns all devices matching the filters, oldest first. Filters
+        combine with AND. An empty result is `[]`, never `null`.
+        There is no pagination yet.
+      parameters:
+        - name: brand
+          in: query
+          description: Exact, case-sensitive brand match.
+          schema:
+            type: string
+          example: Acme
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/State"
+      responses:
+        "200":
+          description: Matching devices.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /devices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceID"
+
+    get:
+      tags: [Devices]
+      operationId: getDevice
+      summary: Get a device
+      responses:
+        "200":
+          description: The device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      tags: [Devices]
+      operationId: replaceDevice
+      summary: Replace a device
+      description: |
+        Full update: `name`, `brand` and `state` are all required. While the
+        device is `in-use`, `name` and `brand` must be sent unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceDevice"
+            example:
+              name: Phone X
+              brand: Acme
+              state: inactive
+      responses:
+        "200":
+          description: The updated device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InUse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      tags: [Devices]
+      operationId: updateDevice
+      summary: Partially update a device
+      description: |
+        Only the fields sent change; omitted or `null` fields keep their
+        value. `{}` is a valid no-op. While the device is `in-use`, `name`
+        and `brand` can't change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDevice"
+            example:
+              state: in-use
+      responses:
+        "200":
+          description: The updated device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InUse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: [Devices]
+      operationId: deleteDevice
+      summary: Delete a device
+      description: |
+        Devices that are `in-use` can't be deleted. Deleting an unknown id
+        returns 404; the operation is still idempotent, since the device is
+        gone either way.
+      responses:
+        "204":
+          description: Deleted. No body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InUse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: health
+      summary: Readiness check
+      description: Returns 200 when the service can reach its database.
+      responses:
+        "200":
+          description: Ready. No body.
+        "503":
+          description: The database is unreachable.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: database unavailable
+
+components:
+  parameters:
+    DeviceID:
+      name: id
+      in: path
+      required: true
+      description: Device id. A malformed id returns 400.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    State:
+      type: string
+      enum: [available, in-use, inactive]
+
+    Device:
+      type: object
+      required: [id, name, brand, state, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        brand:
+          type: string
+        state:
+          $ref: "#/components/schemas/State"
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Set by the server in UTC; never changes.
+      example:
+        id: 3e3d6681-72d4-4654-a3a8-64eaba8d1c1d
+        name: Phone X
+        brand: Acme
+        state: available
+        createdAt: "2026-09-26T16:00:58.652868Z"
+
+    Name:
+      type: string
+      pattern: \S
+      description: Surrounding whitespace is trimmed; must not be blank.
+
+    Brand:
+      type: string
+      pattern: \S
+      description: Surrounding whitespace is trimmed; must not be blank.
+
+    CreateDevice:
+      type: object
+      additionalProperties: false
+      required: [name, brand]
+      properties:
+        name:
+          $ref: "#/components/schemas/Name"
+        brand:
+          $ref: "#/components/schemas/Brand"
+        state:
+          $ref: "#/components/schemas/State"
+          description: Defaults to `available`.
+
+    ReplaceDevice:
+      type: object
+      additionalProperties: false
+      required: [name, brand, state]
+      properties:
+        name:
+          $ref: "#/components/schemas/Name"
+        brand:
+          $ref: "#/components/schemas/Brand"
+        state:
+          $ref: "#/components/schemas/State"
+
+    UpdateDevice:
+      type: object
+      additionalProperties: false
+      description: "`null` is treated the same as omitting the field."
+      properties:
+        name:
+          oneOf:
+            - $ref: "#/components/schemas/Name"
+            - type: "null"
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/Brand"
+            - type: "null"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/State"
+            - type: "null"
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+  responses:
+    BadRequest:
+      description: |
+        Invalid input: malformed JSON, an unknown or missing field, a blank
+        name or brand, an unknown state, or a malformed id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            missingField:
+              value:
+                error: "invalid input: name is required"
+            unknownField:
+              value:
+                error: 'invalid input: malformed JSON body: json: unknown field "createdAt"'
+            malformedId:
+              value:
+                error: 'invalid input: invalid id "abc"'
+    NotFound:
+      description: No device has this id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: device not found
+    InUse:
+      description: The change conflicts with the device being in use.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            rename:
+              value:
+                error: "device is in use: cannot change name"
+            delete:
+              value:
+                error: "device is in use: cannot delete device"
+    InternalError:
+      description: Unexpected server error. Details are logged, never returned.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: internal server error
