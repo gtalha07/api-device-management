@@ -1,13 +1,16 @@
 DATABASE_URL ?= postgres://devices:devices@localhost:5433/devices?sslmode=disable
 MIGRATE := migrate -path migrations -database "$(DATABASE_URL)"
 
-.PHONY: db-up db-down db-reset migrate-up migrate-down test test-integration
+.PHONY: db-up db-down db-reset run migrate-up migrate-down test test-integration
 
 db-up:
 	docker compose up -d --wait db
 
 db-down:
 	docker compose down
+
+run: db-up
+	DATABASE_URL="$(DATABASE_URL)" go run ./cmd/api
 
 migrate-up:
 	$(MIGRATE) up
