@@ -25,6 +25,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /devices/{id}", h.get)
 	mux.HandleFunc("PUT /devices/{id}", h.replace)
 	mux.HandleFunc("PATCH /devices/{id}", h.patch)
+	mux.HandleFunc("DELETE /devices/{id}", h.remove)
 }
 
 type createRequest struct {
@@ -124,6 +125,16 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, req updateReque
 	}
 
 	writeJSON(w, http.StatusOK, d)
+}
+
+// remove handles DELETE: returns no content and no body as device no longer exists
+func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.Delete(r.Context(), r.PathValue("id")); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 const maxBodyBytes = 1 << 20 // 1 MiB
