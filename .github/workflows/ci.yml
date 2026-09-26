@@ -32,6 +32,14 @@ jobs:
         with:
           version: v2.14
 
+  openapi:
+    name: OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint api/openapi.yaml
+        run: npx --yes @redocly/cli@2.54.3 lint api/openapi.yaml
+
   vulncheck:
     name: Vulnerability check
     runs-on: ubuntu-latest
