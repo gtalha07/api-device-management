@@ -57,11 +57,13 @@ func run(ctx context.Context, logger *slog.Logger) error {
 
 	// wiring the pieces together
 	repo := device.NewPostgresRepository(pool)
-	notifier := notify.NewLogNotifier(logger)
+	hub := notify.NewHub(logger)
+	notifier := notify.Multi{notify.NewLogNotifier(logger), hub}
 	service := device.NewService(repo, notifier, logger)
 
 	mux := http.NewServeMux()
 	device.NewHandler(service, logger).Register(mux)
+	mux.Handle("GET /devices/events", hub)
 
 	// health check: a readiness probe (can we serve?).
 	// TODO: add a separate liveness probe that doesn't depend on the
@@ -87,6 +89,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
+	// Open event streams never go idle, so Shutdown would wait for its full
+	// timeout; closing the hub ends them as soon as shutdown starts.
+	srv.RegisterOnShutdown(hub.Close)
 	// serving and graceful shutdown
 	serveErr := make(chan error, 1)
 	go func() {
