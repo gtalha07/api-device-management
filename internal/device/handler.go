@@ -21,6 +21,8 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 // Register adds the device routes to mux.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /devices", h.create)
+	mux.HandleFunc("GET /devices", h.list)
+	mux.HandleFunc("GET /devices/{id}", h.get)
 }
 
 type createRequest struct {
@@ -44,6 +46,33 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", "/devices/"+d.ID)
 	writeJSON(w, http.StatusCreated, d)
+}
+
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+	d, err := h.service.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := Filter{Brand: q.Get("brand"), State: State(q.Get("state"))}
+
+	devices, err := h.service.List(r.Context(), filter)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	if devices == nil {
+		devices = []Device{} // always a JSON array, not null
+	}
+
+	writeJSON(w, http.StatusOK, devices)
 }
 
 const maxBodyBytes = 1 << 20 // 1 MiB
