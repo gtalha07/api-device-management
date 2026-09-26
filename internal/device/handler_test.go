@@ -288,3 +288,55 @@ func TestHandlerUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestHandlerDelete(t *testing.T) {
+	const availableID = "7f1c2b9e-3a4d-4e5f-8a6b-1c2d3e4f5a6b"
+	const inUseID = "2b8e4c1d-6f3a-4b7e-9c2d-8e1f3a5b7c9d"
+	const unknownID = "00000000-0000-4000-8000-000000000000"
+	available := Device{ID: availableID, Name: "Phone X", Brand: "Acme", State: StateAvailable}
+	inUse := Device{ID: inUseID, Name: "Phone Y", Brand: "Acme", State: StateInUse}
+
+	tests := []struct {
+		name        string
+		id          string
+		wantStatus  int
+		wantError   string
+		wantRepoHit bool
+		wantDeleted bool
+	}{
+		{name: "available device", id: availableID, wantStatus: http.StatusNoContent, wantRepoHit: true, wantDeleted: true},
+		{name: "in-use device", id: inUseID, wantStatus: http.StatusConflict, wantError: "device is in use: cannot delete device", wantRepoHit: true},
+		{name: "unknown id", id: unknownID, wantStatus: http.StatusNotFound, wantError: "device not found", wantRepoHit: true},
+		{name: "malformed id", id: "abc", wantStatus: http.StatusBadRequest, wantError: `invalid input: invalid id "abc"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{devices: map[string]Device{availableID: available, inUseID: inUse}}
+			rec := do(repo, http.MethodDelete, "/devices/"+tt.id, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if hit := len(repo.deleteIDs) > 0; hit != tt.wantRepoHit {
+				t.Errorf("repo.Delete called = %v, want %v", hit, tt.wantRepoHit)
+			}
+			wantStored := 2
+			if tt.wantDeleted {
+				wantStored = 1
+			}
+			if got := len(repo.devices); got != wantStored {
+				t.Errorf("devices stored = %d, want %d", got, wantStored)
+			}
+			if tt.wantError != "" {
+				if got := decodeError(t, rec); got != tt.wantError {
+					t.Errorf("error = %q, want %q", got, tt.wantError)
+				}
+				return
+			}
+			if rec.Body.Len() != 0 {
+				t.Errorf("body = %q, want empty for 204", rec.Body)
+			}
+		})
+	}
+}
