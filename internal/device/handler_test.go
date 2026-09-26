@@ -96,8 +96,7 @@ func TestHandlerCreateResponse(t *testing.T) {
 func TestHandlerMethodNotAllowed(t *testing.T) {
 	repo := &fakeRepo{}
 	rec := do(repo, http.MethodDelete, "/devices", "")
-	// rec := httptest.NewRecorder()
-	// newTestHandler(&fakeRepo{}).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/devices", nil))
+
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
 	}
