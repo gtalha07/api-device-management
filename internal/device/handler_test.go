@@ -4,14 +4,38 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestHandler(repo Repository) http.Handler {
 	mux := http.NewServeMux()
 	NewHandler(newTestService(repo), discardLogger()).Register(mux)
 	return mux
+}
+
+// do sends a request through a handler backed by repo and returns the recorder.
+func do(repo Repository, method, target, body string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	newTestHandler(repo).ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
+	return rec
+}
+
+// decodeError reads an errorResponse and fails if anything follows it.
+func decodeError(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+
+	var got errorResponse
+	dec := json.NewDecoder(rec.Body)
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if dec.More() {
+		t.Error("response has extra data after the error JSON")
+	}
+	return got.Error
 }
 
 func TestHandlerCreate(t *testing.T) {
@@ -30,9 +54,8 @@ func TestHandlerCreate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/devices", strings.NewReader(tt.body))
-			newTestHandler(&fakeRepo{}).ServeHTTP(rec, req)
+			repo := &fakeRepo{}
+			rec := do(repo, http.MethodPost, "/devices", tt.body)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body)
@@ -43,25 +66,16 @@ func TestHandlerCreate(t *testing.T) {
 			if tt.wantError == "" {
 				return
 			}
-			var got errorResponse
-			dec := json.NewDecoder(rec.Body)
-			if err := dec.Decode(&got); err != nil {
-				t.Fatalf("decode error body: %v", err)
-			}
-			if dec.More() {
-				t.Error("response has extra data after the error JSON")
-			}
-			if got.Error != tt.wantError {
-				t.Errorf("error = %q, want %q", got.Error, tt.wantError)
+			if got := decodeError(t, rec); got != tt.wantError {
+				t.Errorf("error = %q, want %q", got, tt.wantError)
 			}
 		})
 	}
 }
 
 func TestHandlerCreateResponse(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/devices", strings.NewReader(`{"name":" Phone X ","brand":"Acme"}`))
-	newTestHandler(&fakeRepo{}).ServeHTTP(rec, req)
+	repo := &fakeRepo{}
+	rec := do(repo, http.MethodPost, "/devices", `{"name":" Phone X ", "brand":"Acme"}`)
 
 	if loc := rec.Header().Get("Location"); loc != "/devices/test-1" {
 		t.Errorf("Location = %q, want /devices/test-1", loc)
@@ -80,9 +94,107 @@ func TestHandlerCreateResponse(t *testing.T) {
 }
 
 func TestHandlerMethodNotAllowed(t *testing.T) {
-	rec := httptest.NewRecorder()
-	newTestHandler(&fakeRepo{}).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/devices", nil))
+	repo := &fakeRepo{}
+	rec := do(repo, http.MethodDelete, "/devices", "")
+	// rec := httptest.NewRecorder()
+	// newTestHandler(&fakeRepo{}).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/devices", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestHandlerGet(t *testing.T) {
+	const knownID = "7f1c2b9e-3a4d-4e5f-8a6b-1c2d3e4f5a6b"
+	const unknownID = "00000000-0000-4000-8000-000000000000"
+	known := Device{ID: knownID, Name: "Phone X", Brand: "Acme", State: StateAvailable,
+		CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+	tests := []struct {
+		name       string
+		id         string
+		wantStatus int
+		wantError  string
+	}{
+		{"known id", knownID, http.StatusOK, ""},
+		{"unknown id", unknownID, http.StatusNotFound, "device not found"},
+		{"malformed id", "abc", http.StatusBadRequest, `invalid input: invalid id "abc"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{devices: map[string]Device{knownID: known}}
+			rec := do(repo, http.MethodGet, "/devices/"+tt.id, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantError != "" {
+				if got := decodeError(t, rec); got != tt.wantError {
+					t.Errorf("error = %q, want %q", got, tt.wantError)
+				}
+				return
+			}
+
+			var got Device
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if got != known {
+				t.Errorf("body = %+v, want %+v", got, known)
+			}
+		})
+	}
+}
+
+func TestHandlerList(t *testing.T) {
+	a := Device{ID: "a", Name: "Phone A", Brand: "Acme", State: StateAvailable}
+	b := Device{ID: "b", Name: "Phone B", Brand: "Acme", State: StateInUse}
+
+	tests := []struct {
+		name       string
+		target     string
+		listed     []Device
+		wantStatus int
+		wantFilter Filter
+		wantBody   string
+	}{
+		{"no filter", "/devices", []Device{a, b}, http.StatusOK, Filter{}, ""},
+		{"brand and state", "/devices?brand=Acme&state=in-use", []Device{b}, http.StatusOK, Filter{Brand: "Acme", State: StateInUse}, ""},
+		{"empty result is an array", "/devices?brand=Nope", nil, http.StatusOK, Filter{Brand: "Nope"}, "[]\n"},
+		{"unknown state", "/devices?state=broken", nil, http.StatusBadRequest, Filter{}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{listed: tt.listed}
+			rec := do(repo, http.MethodGet, tt.target, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus != http.StatusOK {
+				if len(repo.filters) != 0 {
+					t.Errorf("repo.List called with %+v, want no call", repo.filters)
+				}
+				return
+			}
+			if len(repo.filters) != 1 || repo.filters[0] != tt.wantFilter {
+				t.Errorf("repo.List filters = %+v, want [%+v]", repo.filters, tt.wantFilter)
+			}
+			if tt.wantBody != "" {
+				if got := rec.Body.String(); got != tt.wantBody {
+					t.Errorf("body = %q, want %q", got, tt.wantBody)
+				}
+				return
+			}
+
+			var got []Device
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if !slices.Equal(got, tt.listed) {
+				t.Errorf("body = %+v, want %+v", got, tt.listed)
+			}
+		})
 	}
 }
