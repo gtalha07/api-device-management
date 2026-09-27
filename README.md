@@ -132,7 +132,9 @@ stricter.
 
 - **Unit tests** cover the service rules and every HTTP handler with a fake
   repository and notifier, and the event stream: fan-out, slow subscribers,
-  and streams ending on shutdown.
+  and streams ending on shutdown. The request-logging middleware is tested
+  for its log line, the `X-Request-ID` header, and that the event stream can
+  still flush through it.
 - **Integration tests** run the repository against real Postgres, including a
   test that races two concurrent updates to prove the row lock works. They
   run only when `TEST_DATABASE_URL` is set and migrate the schema themselves.
@@ -141,8 +143,8 @@ stricter.
   lint, govulncheck, tests with `-race` against a Postgres service container
   (coverage summary and HTML report), and a Docker build.
 
-Coverage is about 76% overall (`internal/device` 92%); `cmd/api` is wiring
-and not unit-tested.
+Coverage is about 77% overall (`internal/device` 92%, `internal/httplog`
+100%); `cmd/api` is wiring and not unit-tested.
 
 ## Project structure
 
@@ -151,6 +153,7 @@ cmd/api/            main: config, wiring, HTTP server, graceful shutdown
 internal/device/    model, business rules (service), Postgres repository, HTTP handlers
 internal/database/  connection pool with startup ping; embedded migrations runner
 internal/notify/    Notifiers: SSE hub for subscribers, structured log, and Multi to use both
+internal/httplog/   Request logging middleware: one log line per request, with a request id
 migrations/         SQL migrations (golang-migrate), embedded into the binary
 api/openapi.yaml    API specification
 ```
@@ -170,8 +173,9 @@ api/openapi.yaml    API specification
   mapped to status codes in one place, and `main` as the only place that knows
   the concrete implementations.
 - **Production basics:** fail fast if the database is unreachable, server
-  timeouts, a request size limit, JSON logs, graceful shutdown, and a small
-  distroless non-root image.
+  timeouts, a request size limit, JSON logs with one line per request (method,
+  path, status, duration and a request id, also returned in `X-Request-ID`),
+  graceful shutdown, and a small distroless non-root image.
 
 ## Limitations and next steps
 
@@ -196,6 +200,9 @@ Each item is also a `TODO` next to the relevant code.
   replicas they'd move to a separate deploy step.
 - **`/healthz` is readiness only**; a separate liveness probe would avoid
   restarts during a database outage.
+- **No metrics or tracing,** and the request id appears only in the request's
+  own log line, not in the handlers' logs. Next: Prometheus metrics,
+  OpenTelemetry tracing, and the id carried in the request context.
 - **Integration tests share the local development database** and truncate
   it; a dedicated test database or testcontainers would isolate them.
 
