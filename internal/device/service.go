@@ -172,7 +172,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Device
 		// context.WithoutCancel(ctx) once Notify does real I/O.
 		err := s.notifier.Notify(ctx, change)
 		if err != nil {
-			s.logger.Error("notify state change failed", "device_id", updated.ID, "err", err)
+			s.logger.ErrorContext(ctx, "notify state change failed", "device_id", updated.ID, "err", err)
 		}
 	}
 
