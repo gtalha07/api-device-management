@@ -22,6 +22,7 @@ func RequestID(ctx context.Context) string {
 // Middleware logs the method, path, status, duration and a request id for
 // every request handled by next, and returns the id in the X-Request-ID
 // response header so a client can quote it when reporting a problem.
+// The id is also stored in the request context for Handler to add to other logs.
 func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
