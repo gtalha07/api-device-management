@@ -174,7 +174,8 @@ api/openapi.yaml    API specification
   the concrete implementations.
 - **Production basics:** fail fast if the database is unreachable, server
   timeouts, a request size limit, JSON logs with one line per request (method,
-  path, status, duration and a request id, also returned in `X-Request-ID`),
+  path, status, duration and a request id, also returned in `X-Request-ID`)
+  and the same id on every other log line of that request,
   graceful shutdown, and a small distroless non-root image.
 
 ## Limitations and next steps
@@ -200,9 +201,8 @@ Each item is also a `TODO` next to the relevant code.
   replicas they'd move to a separate deploy step.
 - **`/healthz` is readiness only**; a separate liveness probe would avoid
   restarts during a database outage.
-- **No metrics or tracing,** and the request id appears only in the request's
-  own log line, not in the handlers' logs. Next: Prometheus metrics,
-  OpenTelemetry tracing, and the id carried in the request context.
+- **No metrics or tracing;** logs are the only signal. Prometheus metrics and
+  OpenTelemetry tracing would be next.
 - **Integration tests share the local development database** and truncate
   it; a dedicated test database or testcontainers would isolate them.
 
