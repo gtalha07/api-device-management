@@ -88,7 +88,7 @@ func discardLogger() *slog.Logger {
 }
 
 func newTestService(repo Repository) *Service {
-	return NewService(repo, nil, discardLogger())
+	return NewService(repo, &fakeNotifier{}, discardLogger())
 }
 
 func ptr[T any](v T) *T { return &v }
