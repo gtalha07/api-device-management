@@ -14,6 +14,7 @@ import (
 
 	"github.com/gtalha07/api-device-management/internal/database"
 	"github.com/gtalha07/api-device-management/internal/device"
+	"github.com/gtalha07/api-device-management/internal/httplog"
 	"github.com/gtalha07/api-device-management/internal/notify"
 	"github.com/gtalha07/api-device-management/migrations"
 )
@@ -81,7 +82,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	// server with timeouts
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           httplog.Middleware(logger, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
