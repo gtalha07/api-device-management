@@ -76,3 +76,17 @@ func TestMiddlewareKeepsResponseController(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
+
+func TestMiddlewareStoresIDInContext(t *testing.T) {
+	var seen string
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = RequestID(r.Context())
+	})
+
+	rec := httptest.NewRecorder()
+	Middleware(slog.New(slog.DiscardHandler), next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if id := rec.Header().Get("X-Request-ID"); seen == "" || seen != id {
+		t.Errorf("RequestID in handler = %q, X-Request-ID = %q; want the same non-empty id", seen, id)
+	}
+}

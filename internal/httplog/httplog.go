@@ -2,6 +2,7 @@
 package httplog
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -9,12 +10,18 @@ import (
 	"github.com/google/uuid"
 )
 
+type ctxKey struct{}
+
+// RequestID returns the request id Middleware stored in ctx, or "" if there
+// is none.
+func RequestID(ctx context.Context) string {
+	id, _ := ctx.Value(ctxKey{}).(string)
+	return id
+}
+
 // Middleware logs the method, path, status, duration and a request id for
 // every request handled by next, and returns the id in the X-Request-ID
 // response header so a client can quote it when reporting a problem.
-//
-// TODO: the request id is not passed to the handlers' own logs; putting it
-// in the request context would let every log line of a request share it.
 func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -22,8 +29,10 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", id)
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		ctx := context.WithValue(r.Context(), ctxKey{}, id)
+		next.ServeHTTP(rec, r.WithContext(ctx))
 
+		// r.Context() doesn't hold the id, so Handler won't add it a second time.
 		logger.InfoContext(r.Context(), "request",
 			"request_id", id,
 			"method", r.Method,
